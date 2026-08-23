@@ -25,12 +25,6 @@ TYPE_LABELS = {
     "treadmill_running": "Esteira",
     "trail_running": "Trilha",
     "street_running": "Rua",
-    "nike_run": "Corrida",
-}
-
-SOURCE_LABELS = {
-    "garmin": "Garmin",
-    "nike": "Nike Run Club",
 }
 
 
@@ -155,7 +149,6 @@ def build(report: dict) -> str:
             "id": r["id"],
             "name": r["name"],
             "type": TYPE_LABELS.get(r["type"], r["type"] or "Corrida"),
-            "source": SOURCE_LABELS.get(r.get("source"), r.get("source") or "Garmin"),
             "date": r["date"],
             "km": r["km"],
             "duration_s": r.get("duration_s"),
@@ -630,8 +623,6 @@ TEMPLATE = r'''<meta charset="utf-8">
     background: var(--surface-2);
     color: var(--ink-muted);
   }}
-  .type-pill.source-garmin {{ color: var(--accent); }}
-  .type-pill.source-nike-run-club {{ color: var(--gold); }}
 
   .tooltip {{
     position: fixed;
@@ -772,7 +763,6 @@ TEMPLATE = r'''<meta charset="utf-8">
             <th data-key="date" class="sorted">Data <span class="arrow">↓</span></th>
             <th data-key="name">Corrida</th>
             <th data-key="type">Tipo</th>
-            <th data-key="source">Origem</th>
             <th data-key="km" class="num">Distância <span class="arrow"></span></th>
             <th data-key="pace" class="num">Ritmo <span class="arrow"></span></th>
             <th data-key="duration" class="num">Duração <span class="arrow"></span></th>
@@ -846,7 +836,6 @@ TEMPLATE = r'''<meta charset="utf-8">
         '<td>' + fmtDateBR(r.date) + '</td>' +
         '<td class="name">' + r.name.replace(/</g,'&lt;') + '</td>' +
         '<td><span class="type-pill">' + r.type + '</span></td>' +
-        '<td><span class="type-pill source-' + r.source.replace(/\s+/g,'-').toLowerCase() + '">' + r.source + '</span></td>' +
         '<td class="num">' + fmtKm(r.km) + ' km</td>' +
         '<td class="num">' + fmtPace(p) + '</td>' +
         '<td class="num">' + fmtDuration(r.duration_s) + '</td>' +

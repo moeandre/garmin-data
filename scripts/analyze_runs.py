@@ -83,7 +83,6 @@ def build_report(activities: list[dict], tolerance: float) -> dict:
                 "year": dt.year,
                 "km": round(km, 3),
                 "duration_s": round(a["duration"] / 1000, 1) if a.get("duration") else None,
-                "source": "garmin",
                 "avg_hr": avg_hr,
                 "avg_cadence": round(avg_cadence, 1) if avg_cadence is not None else None,
                 "hr_zones": hr_zones,

@@ -50,7 +50,7 @@ import sys
 import time
 from datetime import datetime, timezone
 
-from garmin_common import build_hr_zones, derive_since, is_running_type, load_cached_runs, runs_by_source, summarize
+from garmin_common import build_hr_zones, derive_since, is_running_type, load_cached_runs, summarize
 
 try:
     from garminconnect import (
@@ -137,7 +137,6 @@ def normalize_activity(a: dict) -> dict | None:
         "year": dt.year,
         "km": round(distance_m / 1000, 3),
         "duration_s": round(duration_s, 1) if duration_s is not None else None,
-        "source": "garmin",
         "avg_hr": a.get("averageHR"),
         "avg_cadence": a.get("averageRunningCadenceInStepsPerMinute"),
         "hr_zones": None,  # preenchido a parte (ver fetch_hr_zones), exige 1 chamada por atividade
@@ -241,26 +240,18 @@ def main() -> None:
     parser.add_argument("--debug", action="store_true", help="Mostra detalhes de erros ao buscar zonas de FC")
     args = parser.parse_args()
 
-    # O cache (--out) pode conter corridas de outras fontes tambem (ex: Nike
-    # Run Club via fetch_nike.py). all_cached e sempre carregado por inteiro
-    # (mesmo com --full) para nunca apagar corridas de outra fonte no merge
-    # final — --full so forca refazer a busca do Garmin do zero. O cursor
-    # incremental (--since / known_ids) so olha para as do Garmin, senao uma
-    # sincronizacao frequente do Garmin faria a gente nunca voltar atras o
-    # suficiente pra pegar corridas antigas de outra fonte, e vice-versa.
-    all_cached = load_cached_runs(args.out)
-    garmin_cached = {} if args.full else runs_by_source(all_cached, "garmin")
-    if all_cached:
-        print(f"Cache local encontrado: {len(all_cached)} corridas em {args.out} ({len(garmin_cached)} do Garmin)")
+    cached = {} if args.full else load_cached_runs(args.out)
+    if cached:
+        print(f"Cache local encontrado: {len(cached)} corridas em {args.out}")
 
     since = args.since
-    if since is None and garmin_cached and not args.full:
-        since = derive_since(garmin_cached, args.overlap_days)
+    if since is None and cached and not args.full:
+        since = derive_since(cached, args.overlap_days)
         print(f"Modo incremental: buscando corridas a partir de {since} (folga de {args.overlap_days}d)")
     elif args.full:
         print("Carga completa (--full): ignorando cache e rebuscando todo o historico")
-    elif not garmin_cached:
-        print("Sem cache local do Garmin: fazendo carga inicial completa via API")
+    elif not cached:
+        print("Sem cache local: fazendo carga inicial completa via API")
 
     print("Entrando no Garmin Connect...")
     client = login(args.token_dir)
@@ -268,7 +259,7 @@ def main() -> None:
 
     fetched = fetch_running_activities(
         client,
-        known_ids=set(garmin_cached),
+        known_ids=set(cached),
         since=since,
         page_size=args.page_size,
         max_pages=args.max_pages,
@@ -277,7 +268,7 @@ def main() -> None:
         debug=args.debug,
     )
 
-    merged = dict(all_cached)
+    merged = dict(cached)
     for run in fetched:
         merged[run["id"]] = run  # dados novos sobrescrevem (ex: corrida renomeada)
 

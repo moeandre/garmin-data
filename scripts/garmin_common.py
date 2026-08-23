@@ -1,11 +1,10 @@
 """Logica compartilhada entre os scripts de analise (analyze_runs.py,
-fetch_garmin.py, fetch_nike.py).
+fetch_garmin.py).
 
 Define os marcos de distancia e a funcao que transforma uma lista de corridas
-ja normalizadas — vindas de qualquer fonte (export do Garmin, API do Garmin
-Connect, API do Nike Run Club) — em um relatorio pronto para a pagina web
-(build_page.py). O report.json resultante funciona tambem como cache local
-para as atualizacoes incrementais dos scripts fetch_*.py.
+ja normalizadas em um relatorio pronto para a pagina web (build_page.py). O
+report.json resultante funciona tambem como cache local para a atualizacao
+incremental do fetch_garmin.py.
 """
 from __future__ import annotations
 
@@ -96,12 +95,9 @@ def build_hr_zones(seconds_by_zone: dict[int, float]) -> list[float] | None:
     return [round(z, 1) for z in zones]
 
 
-# --- cache local compartilhado pelos scripts fetch_*.py -------------------
+# --- cache local usado pelo fetch_garmin.py --------------------------------
 #
-# O proprio report.json funciona como cache: cada corrida carrega um campo
-# "source" (ex: "garmin", "nike") para que cada integracao saiba filtrar so
-# as corridas que ela mesma importou, sem misturar o cursor incremental de
-# uma fonte com o de outra.
+# O proprio report.json funciona como cache pra atualizacao incremental.
 
 def load_cached_runs(path: str) -> dict[object, dict]:
     """Le um report.json existente (se houver) e devolve {id: run}."""
@@ -112,20 +108,13 @@ def load_cached_runs(path: str) -> dict[object, dict]:
     return {r["id"]: r for r in prev.get("runs", [])}
 
 
-def runs_by_source(cached_runs: dict[object, dict], source: str) -> dict[object, dict]:
-    """Filtra {id: run} pelas corridas que vieram de uma fonte especifica.
-    Corridas sem "source" (caches gerados antes desse campo existir) sao
-    tratadas como "garmin", que era a unica fonte na epoca."""
-    return {rid: r for rid, r in cached_runs.items() if r.get("source", "garmin") == source}
-
-
-def derive_since(runs_for_source: dict[object, dict], overlap_days: int) -> str | None:
+def derive_since(cached_runs: dict[object, dict], overlap_days: int) -> str | None:
     """Deriva uma data de corte (YYYY-MM-DD) a partir da corrida mais recente
-    ja conhecida de uma fonte, com alguns dias de folga de seguranca — usado
-    para tornar as atualizacoes incrementais rapidas sem precisar de --since
-    manual. Devolve None se ainda nao ha nada em cache (carga inicial)."""
-    if not runs_for_source:
+    ja em cache, com alguns dias de folga de seguranca — usado para tornar as
+    atualizacoes incrementais rapidas sem precisar de --since manual. Devolve
+    None se ainda nao ha nada em cache (carga inicial)."""
+    if not cached_runs:
         return None
-    last_known_date = max(r["date"] for r in runs_for_source.values())
+    last_known_date = max(r["date"] for r in cached_runs.values())
     cutoff = date.fromisoformat(last_known_date) - timedelta(days=overlap_days)
     return cutoff.isoformat()
