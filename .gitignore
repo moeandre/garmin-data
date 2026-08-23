@@ -1,0 +1,12 @@
+# Sessao logada do Garmin Connect (fetch_garmin.py) — nunca commitar.
+.garmin_tokens/
+
+# Dados pessoais do export/relatorio.
+data/
+report.json
+marcos-de-corrida.html
+
+__pycache__/
+*.pyc
+.venv/
+venv/
