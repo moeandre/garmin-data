@@ -14,6 +14,12 @@ import sys
 RAMP_LIGHT = ["#7CB98F", "#5FA475", "#478A5D", "#2C6F46", "#154F30"]  # 5k -> 42k
 RAMP_DARK = ["#2E7D4F", "#3E9761", "#57B378", "#7FCB93", "#ADE0B8"]  # 5k -> 42k
 
+# Zonas de FC — Z1 (recuperacao) a Z5 (maxima). Paleta categorica validada
+# (CVD-safe, adjacent pairs) separadamente pra superficie clara/escura.
+ZONE_COLORS_LIGHT = ["#3B6FBF", "#1E9E82", "#D9A61F", "#C4661A", "#9C2F44"]
+ZONE_COLORS_DARK = ["#5C93E0", "#22A187", "#B18C35", "#A44023", "#F15160"]
+ZONE_LABELS = ["Z1 · Recuperação", "Z2 · Leve", "Z3 · Moderada", "Z4 · Intensa", "Z5 · Máxima"]
+
 TYPE_LABELS = {
     "running": "Rua",
     "treadmill_running": "Esteira",
@@ -153,6 +159,9 @@ def build(report: dict) -> str:
             "date": r["date"],
             "km": r["km"],
             "duration_s": r.get("duration_s"),
+            "avgHr": r.get("avg_hr"),
+            "avgCadence": r.get("avg_cadence"),
+            "hrZones": r.get("hr_zones"),
         }
         for r in sorted(runs, key=lambda r: r["date"], reverse=True)
     ]
@@ -161,8 +170,9 @@ def build(report: dict) -> str:
         [{"key": m["key"], "label": m["label"], "threshold_km": m["threshold_km"]} for m in milestones],
         ensure_ascii=False,
     ).replace("</", "<\\/")
-
     year_options = "\n".join(f'<option value="{y}">{y}</option>' for y in years)
+    date_min = min(r["date"] for r in runs)
+    date_max = max(r["date"] for r in runs)
 
     return TEMPLATE.format(
         cards_html=cards_html,
@@ -178,6 +188,8 @@ def build(report: dict) -> str:
         marathon_count=len(marathons),
         best_year=best_year[0],
         best_year_count=best_year[1],
+        date_min=date_min,
+        date_max=date_max,
         year_options=year_options,
         runs_json=runs_json,
         milestones_json=milestones_json,
@@ -203,6 +215,7 @@ TEMPLATE = r'''<meta charset="utf-8">
     --gold: #A9782A;
     --gold-soft: #F1E4C9;
     --shadow: 0 1px 2px rgba(22,32,26,0.06), 0 8px 24px -12px rgba(22,32,26,0.18);
+    --z1: #3B6FBF; --z2: #1E9E82; --z3: #D9A61F; --z4: #C4661A; --z5: #9C2F44;
   }}
   @media (prefers-color-scheme: dark) {{
     :root:not([data-theme="light"]) {{
@@ -217,6 +230,7 @@ TEMPLATE = r'''<meta charset="utf-8">
       --gold: #D6A34C;
       --gold-soft: #3A3018;
       --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 32px -16px rgba(0,0,0,0.6);
+      --z1: #5C93E0; --z2: #22A187; --z3: #B18C35; --z4: #A44023; --z5: #F15160;
     }}
   }}
   :root[data-theme="dark"] {{
@@ -231,6 +245,7 @@ TEMPLATE = r'''<meta charset="utf-8">
     --gold: #D6A34C;
     --gold-soft: #3A3018;
     --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 32px -16px rgba(0,0,0,0.6);
+    --z1: #5C93E0; --z2: #22A187; --z3: #B18C35; --z4: #A44023; --z5: #F15160;
   }}
 {dark_overrides}
 
@@ -424,6 +439,113 @@ TEMPLATE = r'''<meta charset="utf-8">
   .badge-km {{ font-family: "JetBrains Mono", monospace; font-weight: 600; color: var(--gold); }}
   .badge-empty {{ background: var(--surface-2); color: var(--ink-muted); }}
 
+  input[type="date"] {{
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12.5px;
+    padding: 5px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    color-scheme: light dark;
+  }}
+  .date-range {{ display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-muted); }}
+
+  .perf-grid {{
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+    margin-bottom: 14px;
+  }}
+  @media (max-width: 760px) {{ .perf-grid {{ grid-template-columns: 1fr; }} }}
+  .perf-tile {{
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 18px 20px;
+    box-shadow: var(--shadow);
+  }}
+  .perf-tile h3 {{
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-muted);
+    margin: 0 0 8px;
+    font-weight: 600;
+  }}
+  .perf-num {{
+    font-family: "Bebas Neue", sans-serif;
+    font-size: 44px;
+    line-height: 1;
+    color: var(--accent);
+  }}
+  .perf-num .unit {{
+    font-family: "Work Sans", sans-serif;
+    font-size: 15px;
+    color: var(--ink-muted);
+    margin-left: 4px;
+  }}
+  .perf-coverage {{
+    margin-top: 8px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    color: var(--ink-muted);
+  }}
+
+  .zone-card {{
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 20px;
+    box-shadow: var(--shadow);
+  }}
+  .zone-bar {{
+    display: flex;
+    width: 100%;
+    height: 28px;
+    border-radius: 6px;
+    overflow: hidden;
+    gap: 2px;
+    background: var(--surface-2);
+  }}
+  .zone-seg {{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    cursor: default;
+    transition: opacity .15s;
+  }}
+  .zone-seg:hover {{ opacity: 0.85; }}
+  .zone-seg.z0 {{ background: var(--ink-muted); opacity: 0.35; color: transparent; }}
+  .zone-seg.z1 {{ background: var(--z1); }}
+  .zone-seg.z2 {{ background: var(--z2); }}
+  .zone-seg.z3 {{ background: var(--z3); }}
+  .zone-seg.z4 {{ background: var(--z4); }}
+  .zone-seg.z5 {{ background: var(--z5); }}
+  .zone-legend {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-top: 14px;
+    font-size: 12.5px;
+  }}
+  .zone-legend-item {{ display: flex; align-items: center; gap: 6px; }}
+  .zone-legend-swatch {{ width: 10px; height: 10px; border-radius: 3px; flex: none; }}
+  .zone-legend-label {{ color: var(--ink); font-weight: 500; }}
+  .zone-legend-value {{
+    font-family: "JetBrains Mono", monospace;
+    color: var(--ink-muted);
+    font-variant-numeric: tabular-nums;
+  }}
+  .zone-empty {{ color: var(--ink-muted); font-size: 13px; }}
+
   .controls {{
     display: flex;
     flex-wrap: wrap;
@@ -561,6 +683,47 @@ TEMPLATE = r'''<meta charset="utf-8">
     <p class="section-sub">Quantidade de corridas que alcançaram (ou superaram) cada distância, com a evolução ano a ano.</p>
     <div class="milestones">
       {cards_html}
+    </div>
+  </section>
+
+  <section>
+    <h2>Performance</h2>
+    <p class="section-sub">Ritmo, cadência, frequência cardíaca e tempo em cada zona de FC — filtre por período pra ver como evoluiu.</p>
+    <div class="controls">
+      <div class="chip-group" id="perfChips">
+        <button class="chip" data-preset="all" aria-pressed="true">Tudo</button>
+        <button class="chip" data-preset="year">Este ano</button>
+        <button class="chip" data-preset="90">Últimos 90 dias</button>
+        <button class="chip" data-preset="30">Últimos 30 dias</button>
+      </div>
+      <div class="date-range">
+        <input type="date" id="perfFrom" min="{date_min}" max="{date_max}" value="{date_min}">
+        <span>até</span>
+        <input type="date" id="perfTo" min="{date_min}" max="{date_max}" value="{date_max}">
+      </div>
+      <span class="row-count" id="perfCount"></span>
+    </div>
+    <div class="perf-grid">
+      <div class="perf-tile">
+        <h3>Ritmo médio</h3>
+        <div class="perf-num" id="perfPace">—</div>
+        <div class="perf-coverage" id="perfPaceCoverage"></div>
+      </div>
+      <div class="perf-tile">
+        <h3>Cadência média</h3>
+        <div class="perf-num" id="perfCadence">—</div>
+        <div class="perf-coverage" id="perfCadenceCoverage"></div>
+      </div>
+      <div class="perf-tile">
+        <h3>Frequência cardíaca média</h3>
+        <div class="perf-num" id="perfHr">—</div>
+        <div class="perf-coverage" id="perfHrCoverage"></div>
+      </div>
+    </div>
+    <div class="zone-card">
+      <h3 style="margin:0 0 12px;font-size:12.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-muted);font-weight:600;">Zona de frequência cardíaca</h3>
+      <div id="zoneBarWrap"></div>
+      <div class="zone-legend" id="zoneLegend"></div>
     </div>
   </section>
 
@@ -728,6 +891,113 @@ TEMPLATE = r'''<meta charset="utf-8">
   }});
 
   render();
+
+  // --- Performance: ritmo, cadencia, FC e zonas, filtrado por periodo ---
+  const ZONE_LABELS = ['Z1 · Recuperação', 'Z2 · Leve', 'Z3 · Moderada', 'Z4 · Intensa', 'Z5 · Máxima'];
+  const ZONE_CLASSES = ['z1', 'z2', 'z3', 'z4', 'z5'];
+  const DATE_MIN = '{date_min}', DATE_MAX = '{date_max}';
+  const perfFrom = document.getElementById('perfFrom');
+  const perfTo = document.getElementById('perfTo');
+  const perfChips = document.querySelectorAll('#perfChips .chip');
+  const perfCount = document.getElementById('perfCount');
+
+  function weightedAvg(items, valueKey, weightKey) {{
+    let wsum = 0, vwsum = 0, n = 0;
+    for (const it of items) {{
+      const v = it[valueKey], w = it[weightKey];
+      if (v == null || !w) continue;
+      vwsum += v * w;
+      wsum += w;
+      n++;
+    }}
+    return {{ value: wsum ? vwsum / wsum : null, n }};
+  }}
+
+  function renderPerformance() {{
+    const from = perfFrom.value || DATE_MIN, to = perfTo.value || DATE_MAX;
+    const inPeriod = runs.filter(r => r.date >= from && r.date <= to);
+    perfCount.textContent = inPeriod.length + (inPeriod.length === 1 ? ' corrida no período' : ' corridas no período');
+
+    // Ritmo medio real: soma da duracao / soma da distancia (nao a media simples dos ritmos)
+    const paceRows = inPeriod.filter(r => r.duration_s && r.km > 0);
+    const totalKm = paceRows.reduce((s, r) => s + r.km, 0);
+    const totalS = paceRows.reduce((s, r) => s + r.duration_s, 0);
+    const pace = totalKm ? (totalS / 60) / totalKm : null;
+    document.getElementById('perfPace').innerHTML = pace != null ? fmtPace(pace) : '—';
+    document.getElementById('perfPaceCoverage').textContent = paceRows.length + ' de ' + inPeriod.length + ' corridas com dado';
+
+    const cad = weightedAvg(inPeriod, 'avgCadence', 'duration_s');
+    document.getElementById('perfCadence').innerHTML = cad.value != null ? Math.round(cad.value) + '<span class="unit">passos/min</span>' : '—';
+    document.getElementById('perfCadenceCoverage').textContent = cad.n + ' de ' + inPeriod.length + ' corridas com dado';
+
+    const hr = weightedAvg(inPeriod, 'avgHr', 'duration_s');
+    document.getElementById('perfHr').innerHTML = hr.value != null ? Math.round(hr.value) + '<span class="unit">bpm</span>' : '—';
+    document.getElementById('perfHrCoverage').textContent = hr.n + ' de ' + inPeriod.length + ' corridas com dado';
+
+    // Zonas de FC: soma o tempo (segundos) em cada zona entre as corridas do periodo
+    const zoneRows = inPeriod.filter(r => Array.isArray(r.hrZones));
+    const totals = [0, 0, 0, 0, 0, 0];
+    for (const r of zoneRows) {{ r.hrZones.forEach((s, i) => {{ totals[i] += s; }}); }}
+    const grandTotal = totals.reduce((a, b) => a + b, 0);
+    const wrap = document.getElementById('zoneBarWrap');
+    const legend = document.getElementById('zoneLegend');
+    if (!grandTotal) {{
+      wrap.innerHTML = '<p class="zone-empty">Sem dados de zona de FC no período selecionado.</p>';
+      legend.innerHTML = '';
+    }} else {{
+      let barHtml = '<div class="zone-bar">';
+      if (totals[0] > 0) {{
+        barHtml += '<div class="zone-seg z0" style="flex:' + totals[0] + '" title="Fora de zona"></div>';
+      }}
+      for (let i = 1; i <= 5; i++) {{
+        const pct = totals[i] / grandTotal * 100;
+        if (totals[i] <= 0) continue;
+        barHtml += '<div class="zone-seg ' + ZONE_CLASSES[i - 1] + '" style="flex:' + totals[i] +
+          '" title="' + ZONE_LABELS[i - 1] + ': ' + pct.toFixed(0) + '%">' + (pct >= 8 ? ('Z' + i) : '') + '</div>';
+      }}
+      barHtml += '</div>';
+      wrap.innerHTML = barHtml;
+      legend.innerHTML = [1, 2, 3, 4, 5].filter(i => totals[i] > 0).map(i => {{
+        const pct = totals[i] / grandTotal * 100;
+        const hrs = totals[i] / 3600;
+        return '<div class="zone-legend-item"><span class="zone-legend-swatch" style="background:var(--' + ZONE_CLASSES[i - 1] + ')"></span>' +
+          '<span class="zone-legend-label">' + ZONE_LABELS[i - 1] + '</span>' +
+          '<span class="zone-legend-value">' + pct.toFixed(0) + '% · ' + hrs.toFixed(1) + 'h</span></div>';
+      }}).join('');
+    }}
+  }}
+
+  function applyPerfPreset(preset) {{
+    let fromDate;
+    if (preset === 'all') {{
+      fromDate = DATE_MIN;
+    }} else if (preset === 'year') {{
+      fromDate = DATE_MAX.slice(0, 4) + '-01-01';
+    }} else {{
+      const d = new Date(DATE_MAX + 'T00:00:00Z');
+      d.setUTCDate(d.getUTCDate() - parseInt(preset, 10));
+      fromDate = d.toISOString().slice(0, 10);
+    }}
+    perfFrom.value = fromDate < DATE_MIN ? DATE_MIN : fromDate;
+    perfTo.value = DATE_MAX;
+    renderPerformance();
+  }}
+
+  perfChips.forEach(chip => {{
+    chip.addEventListener('click', () => {{
+      perfChips.forEach(c => c.setAttribute('aria-pressed', 'false'));
+      chip.setAttribute('aria-pressed', 'true');
+      applyPerfPreset(chip.dataset.preset);
+    }});
+  }});
+  [perfFrom, perfTo].forEach(input => {{
+    input.addEventListener('change', () => {{
+      perfChips.forEach(c => c.setAttribute('aria-pressed', 'false'));
+      renderPerformance();
+    }});
+  }});
+
+  renderPerformance();
 }})();
 </script>
 '''

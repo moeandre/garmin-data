@@ -21,7 +21,7 @@ import json
 import os
 from datetime import datetime, timezone
 
-from garmin_common import summarize
+from garmin_common import build_hr_zones, summarize
 
 
 def find_summarized_activities_files(data_dir: str) -> list[str]:
@@ -57,6 +57,23 @@ def build_report(activities: list[dict], tolerance: float) -> dict:
         ts_ms = a.get("startTimeLocal") or a.get("beginTimestamp")
         dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
         km = to_km(a["distance"])
+        avg_hr = a.get("avgHr")
+        # "avgRunCadence" no export e a cadencia de uma perna so (~metade do
+        # que se costuma chamar de "cadencia" ao correr); "avgDoubleCadence"
+        # ja e o total de passos/min e e o que a pagina mostra.
+        avg_cadence = a.get("avgDoubleCadence")
+        if avg_cadence is None and a.get("avgRunCadence") is not None:
+            avg_cadence = a["avgRunCadence"] * 2
+
+        hr_zones = None
+        if avg_hr is not None:
+            seconds_by_zone = {
+                i: a[f"hrTimeInZone_{i}"] / 1000
+                for i in range(7)
+                if f"hrTimeInZone_{i}" in a
+            }
+            hr_zones = build_hr_zones(seconds_by_zone)
+
         runs.append(
             {
                 "id": a["activityId"],
@@ -67,6 +84,9 @@ def build_report(activities: list[dict], tolerance: float) -> dict:
                 "km": round(km, 3),
                 "duration_s": round(a["duration"] / 1000, 1) if a.get("duration") else None,
                 "source": "garmin",
+                "avg_hr": avg_hr,
+                "avg_cadence": round(avg_cadence, 1) if avg_cadence is not None else None,
+                "hr_zones": hr_zones,
             }
         )
     return summarize(runs, tolerance)

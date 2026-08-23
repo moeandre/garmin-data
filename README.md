@@ -6,9 +6,10 @@ correu 5, 10, 15, 21 e 42&nbsp;km — **independente do tamanho da corrida**: um
 corrida de 21&nbsp;km conta ponto pra estatística de 5, 10, 15 **e** 21&nbsp;km.
 
 O resultado é uma página HTML autocontida com os marcos atingidos, evolução ano a
-ano, destaques (corrida mais longa, maratonas, ano mais ativo) e uma tabela
-completa e filtrável de todas as corridas — com a origem (Garmin ou Nike) de
-cada uma.
+ano, uma seção de **Performance** (ritmo, cadência, frequência cardíaca e zona
+de FC, filtrável por período), destaques (corrida mais longa, maratonas, ano
+mais ativo) e uma tabela completa e filtrável de todas as corridas — com a
+origem (Garmin ou Nike) de cada uma.
 
 ## Como funciona
 
@@ -120,8 +121,34 @@ Flags comuns aos dois scripts:
 | `--tolerance 0.03` | margem de tolerância por marco (padrão 3%, cobre imprecisão de GPS) |
 | `--token-dir PATH` | onde guardar a sessão/token (padrão `~/.garmin_tokens` pros dois) |
 
+Só do `fetch_garmin.py`:
+
+| Flag | Efeito |
+|---|---|
+| `--skip-hr-zones` | não busca o tempo em cada zona de FC (1 chamada extra por corrida nova) — mais rápido, mas a corrida fica sem dado pra secão Performance |
+
 Rodar os dois comandos acima de tempos em tempos (manualmente, ou num
 agendador de tarefas) já mantém tudo em dia.
+
+## Performance
+
+A seção **Performance** da página soma ritmo, cadência, FC e tempo em zona de
+todas as corridas dentro do período selecionado (filtro por data, com atalhos
+"Este ano" / "Últimos 90 dias" / "Últimos 30 dias" ou datas manuais). O ritmo
+médio é a soma da distância dividida pela soma do tempo no período (não a
+média simples dos ritmos), que é o jeito correto de agregar.
+
+A disponibilidade de cada dado depende de como a corrida entrou no relatório:
+
+| Dado | Export do Garmin (`analyze_runs.py`) | API do Garmin (`fetch_garmin.py`) | Nike Run Club (`fetch_nike.py`) |
+|---|---|---|---|
+| Ritmo | sempre (via distância/duração) | sempre | sempre |
+| Cadência | se o dispositivo registrou | se o dispositivo registrou | não disponível |
+| FC média | se usou monitor de FC | se usou monitor de FC | se usou monitor de FC |
+| Zona de FC | se o export trouxe o detalhe por zona | se usou monitor de FC (1 chamada extra por corrida — `--skip-hr-zones` desliga) | não disponível |
+
+Corridas sem um dado específico simplesmente não entram naquela média — cada
+cartão mostra "N de M corridas com dado" pra deixar isso visível.
 
 ## Autenticação — Garmin
 

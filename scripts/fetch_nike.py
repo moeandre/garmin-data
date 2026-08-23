@@ -183,6 +183,9 @@ def normalize_activity(a: dict) -> dict | None:
 
     name = ((a.get("tags") or {}).get("com.nike.name")) or a.get("name") or "Corrida (Nike Run Club)"
 
+    summaries = a.get("summaries") or a.get("metric_summaries")
+    avg_hr = _find_metric(summaries, "heart_rate") or _find_metric(summaries, "avg_heart_rate")
+
     return {
         "id": a["id"],
         "name": name,
@@ -192,6 +195,11 @@ def normalize_activity(a: dict) -> dict | None:
         "km": round(float(km), 3),
         "duration_s": duration_s,
         "source": "nike",
+        "avg_hr": avg_hr,
+        # NRC nao expoe cadencia nem zona de FC por essa API — fica de fora
+        # das medias/graficos de Performance, sem quebrar nada.
+        "avg_cadence": None,
+        "hr_zones": None,
     }
 
 

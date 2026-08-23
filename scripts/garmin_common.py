@@ -72,6 +72,30 @@ def is_running_type(type_key: str | None) -> bool:
     return "run" in type_key.lower()
 
 
+# --- performance (ritmo, cadencia, FC, zonas) ------------------------------
+#
+# Campos opcionais em cada corrida: "avg_hr" (bpm), "avg_cadence" (passos
+# totais/min) e "hr_zones" (lista fixa de 6 posicoes, em segundos:
+# [Z0, Z1, Z2, Z3, Z4, "Z5+"], onde Z0 e o tempo abaixo da zona 1 e "Z5+"
+# agrupa a zona 5 em diante). Todos None quando a fonte nao tem esse dado
+# (ex: corrida sem monitor de FC).
+
+def build_hr_zones(seconds_by_zone: dict[int, float]) -> list[float] | None:
+    """Recebe {numero_da_zona: segundos} (zonas 0..N, onde 0 = abaixo da Z1)
+    e devolve a lista fixa de 6 posicoes descrita acima, somando zonas acima
+    de 5 na ultima posicao. None se o dict for vazio/None."""
+    if not seconds_by_zone:
+        return None
+    zones = [0.0] * 6
+    for zone, secs in seconds_by_zone.items():
+        try:
+            idx = min(max(int(zone), 0), 5)
+            zones[idx] += float(secs or 0)
+        except (TypeError, ValueError):
+            continue
+    return [round(z, 1) for z in zones]
+
+
 # --- cache local compartilhado pelos scripts fetch_*.py -------------------
 #
 # O proprio report.json funciona como cache: cada corrida carrega um campo

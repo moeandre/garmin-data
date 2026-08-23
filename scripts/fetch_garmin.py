@@ -50,7 +50,7 @@ import sys
 import time
 from datetime import datetime, timezone
 
-from garmin_common import derive_since, is_running_type, load_cached_runs, runs_by_source, summarize
+from garmin_common import build_hr_zones, derive_since, is_running_type, load_cached_runs, runs_by_source, summarize
 
 try:
     from garminconnect import (
@@ -138,7 +138,35 @@ def normalize_activity(a: dict) -> dict | None:
         "km": round(distance_m / 1000, 3),
         "duration_s": round(duration_s, 1) if duration_s is not None else None,
         "source": "garmin",
+        "avg_hr": a.get("averageHR"),
+        "avg_cadence": a.get("averageRunningCadenceInStepsPerMinute"),
+        "hr_zones": None,  # preenchido a parte (ver fetch_hr_zones), exige 1 chamada por atividade
     }
+
+
+def fetch_hr_zones(client: Garmin, activity_id, debug: bool) -> list[float] | None:
+    """Busca o tempo em cada zona de FC pra 1 atividade (endpoint separado da
+    lista). Best-effort: corrida sem monitor de FC, dispositivo antigo, ou
+    qualquer erro da API resulta em None sem interromper o fetch."""
+    try:
+        raw = client.get_activity_hr_in_timezones(activity_id)
+    except Exception as e:  # noqa: BLE001 - endpoint nao documentado, formato pode variar
+        if debug:
+            print(f"[debug] hrTimeInZones falhou pra atividade {activity_id}: {e}", file=sys.stderr)
+        return None
+    if not raw:
+        return None
+    seconds_by_zone: dict[int, float] = {}
+    for z in raw:
+        zone_num = z.get("zoneNumber", z.get("zone"))
+        secs = z.get("secsInZone", z.get("secondsInZone", z.get("timeInZone")))
+        if zone_num is None or secs is None:
+            continue
+        try:
+            seconds_by_zone[int(zone_num)] = float(secs)
+        except (TypeError, ValueError):
+            continue
+    return build_hr_zones(seconds_by_zone)
 
 
 def fetch_running_activities(
@@ -148,6 +176,8 @@ def fetch_running_activities(
     page_size: int,
     max_pages: int,
     full: bool,
+    fetch_zones: bool = True,
+    debug: bool = False,
 ) -> list[dict]:
     fetched = []
     start = 0
@@ -175,6 +205,8 @@ def fetch_running_activities(
             if since and run["date"] < since:
                 stop = True
                 continue
+            if fetch_zones and run.get("avg_hr") is not None:
+                run["hr_zones"] = fetch_hr_zones(client, run["id"], debug)
             fetched.append(run)
             if run["id"] in known_ids:
                 saw_known = True
@@ -205,6 +237,8 @@ def main() -> None:
     parser.add_argument("--full", action="store_true", help="Ignora o cache existente e rebusca todo o historico (carga inicial via API)")
     parser.add_argument("--page-size", type=int, default=100, help="Atividades por pagina (padrao 100)")
     parser.add_argument("--max-pages", type=int, default=200, help="Trava de seguranca para o numero de paginas")
+    parser.add_argument("--skip-hr-zones", action="store_true", help="Nao busca o tempo em cada zona de FC (1 chamada extra por corrida nova) — mais rapido, mas sem dado pra secao Performance da pagina")
+    parser.add_argument("--debug", action="store_true", help="Mostra detalhes de erros ao buscar zonas de FC")
     args = parser.parse_args()
 
     # O cache (--out) pode conter corridas de outras fontes tambem (ex: Nike
@@ -239,6 +273,8 @@ def main() -> None:
         page_size=args.page_size,
         max_pages=args.max_pages,
         full=args.full,
+        fetch_zones=not args.skip_hr_zones,
+        debug=args.debug,
     )
 
     merged = dict(all_cached)
