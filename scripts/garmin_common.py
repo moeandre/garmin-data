@@ -1,11 +1,17 @@
-"""Logica compartilhada entre os scripts de analise (analyze_runs.py, fetch_garmin.py).
+"""Logica compartilhada entre os scripts de analise (analyze_runs.py,
+fetch_garmin.py, fetch_nike.py).
 
 Define os marcos de distancia e a funcao que transforma uma lista de corridas
-ja normalizadas em um relatorio pronto para a pagina web (build_page.py).
+ja normalizadas — vindas de qualquer fonte (export do Garmin, API do Garmin
+Connect, API do Nike Run Club) — em um relatorio pronto para a pagina web
+(build_page.py). O report.json resultante funciona tambem como cache local
+para as atualizacoes incrementais dos scripts fetch_*.py.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import json
+import os
+from datetime import date, datetime, timedelta, timezone
 
 # Marcos de distancia (em km). 21 e 42 usam a distancia oficial de prova
 # (meia maratona / maratona) como referencia para a tolerancia.
@@ -64,3 +70,38 @@ def is_running_type(type_key: str | None) -> bool:
     if not type_key:
         return False
     return "run" in type_key.lower()
+
+
+# --- cache local compartilhado pelos scripts fetch_*.py -------------------
+#
+# O proprio report.json funciona como cache: cada corrida carrega um campo
+# "source" (ex: "garmin", "nike") para que cada integracao saiba filtrar so
+# as corridas que ela mesma importou, sem misturar o cursor incremental de
+# uma fonte com o de outra.
+
+def load_cached_runs(path: str) -> dict[object, dict]:
+    """Le um report.json existente (se houver) e devolve {id: run}."""
+    if not path or not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as f:
+        prev = json.load(f)
+    return {r["id"]: r for r in prev.get("runs", [])}
+
+
+def runs_by_source(cached_runs: dict[object, dict], source: str) -> dict[object, dict]:
+    """Filtra {id: run} pelas corridas que vieram de uma fonte especifica.
+    Corridas sem "source" (caches gerados antes desse campo existir) sao
+    tratadas como "garmin", que era a unica fonte na epoca."""
+    return {rid: r for rid, r in cached_runs.items() if r.get("source", "garmin") == source}
+
+
+def derive_since(runs_for_source: dict[object, dict], overlap_days: int) -> str | None:
+    """Deriva uma data de corte (YYYY-MM-DD) a partir da corrida mais recente
+    ja conhecida de uma fonte, com alguns dias de folga de seguranca — usado
+    para tornar as atualizacoes incrementais rapidas sem precisar de --since
+    manual. Devolve None se ainda nao ha nada em cache (carga inicial)."""
+    if not runs_for_source:
+        return None
+    last_known_date = max(r["date"] for r in runs_for_source.values())
+    cutoff = date.fromisoformat(last_known_date) - timedelta(days=overlap_days)
+    return cutoff.isoformat()

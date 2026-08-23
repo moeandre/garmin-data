@@ -66,6 +66,7 @@ def build_report(activities: list[dict], tolerance: float) -> dict:
                 "year": dt.year,
                 "km": round(km, 3),
                 "duration_s": round(a["duration"] / 1000, 1) if a.get("duration") else None,
+                "source": "garmin",
             }
         )
     return summarize(runs, tolerance)

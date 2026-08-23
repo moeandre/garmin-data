@@ -48,9 +48,9 @@ import json
 import os
 import sys
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timezone
 
-from garmin_common import is_running_type, summarize
+from garmin_common import derive_since, is_running_type, load_cached_runs, runs_by_source, summarize
 
 try:
     from garminconnect import (
@@ -137,6 +137,7 @@ def normalize_activity(a: dict) -> dict | None:
         "year": dt.year,
         "km": round(distance_m / 1000, 3),
         "duration_s": round(duration_s, 1) if duration_s is not None else None,
+        "source": "garmin",
     }
 
 
@@ -206,26 +207,26 @@ def main() -> None:
     parser.add_argument("--max-pages", type=int, default=200, help="Trava de seguranca para o numero de paginas")
     args = parser.parse_args()
 
-    existing_runs: dict[int, dict] = {}
-    if not args.full and os.path.exists(args.out):
-        with open(args.out, encoding="utf-8") as f:
-            prev = json.load(f)
-        existing_runs = {r["id"]: r for r in prev.get("runs", [])}
-        print(f"Cache local encontrado: {len(existing_runs)} corridas em {args.out}")
+    # O cache (--out) pode conter corridas de outras fontes tambem (ex: Nike
+    # Run Club via fetch_nike.py). all_cached e sempre carregado por inteiro
+    # (mesmo com --full) para nunca apagar corridas de outra fonte no merge
+    # final — --full so forca refazer a busca do Garmin do zero. O cursor
+    # incremental (--since / known_ids) so olha para as do Garmin, senao uma
+    # sincronizacao frequente do Garmin faria a gente nunca voltar atras o
+    # suficiente pra pegar corridas antigas de outra fonte, e vice-versa.
+    all_cached = load_cached_runs(args.out)
+    garmin_cached = {} if args.full else runs_by_source(all_cached, "garmin")
+    if all_cached:
+        print(f"Cache local encontrado: {len(all_cached)} corridas em {args.out} ({len(garmin_cached)} do Garmin)")
 
-    # Modo incremental: sem --since explicito, deriva o corte do proprio cache
-    # (data da corrida mais recente conhecida, com alguns dias de folga) para
-    # evitar paginar o historico inteiro a cada execucao.
     since = args.since
-    if since is None and existing_runs and not args.full:
-        last_known_date = max(r["date"] for r in existing_runs.values())
-        cutoff = date.fromisoformat(last_known_date) - timedelta(days=args.overlap_days)
-        since = cutoff.isoformat()
-        print(f"Modo incremental: buscando corridas a partir de {since} (ultima conhecida: {last_known_date}, folga de {args.overlap_days}d)")
+    if since is None and garmin_cached and not args.full:
+        since = derive_since(garmin_cached, args.overlap_days)
+        print(f"Modo incremental: buscando corridas a partir de {since} (folga de {args.overlap_days}d)")
     elif args.full:
         print("Carga completa (--full): ignorando cache e rebuscando todo o historico")
-    elif not existing_runs:
-        print("Sem cache local: fazendo carga inicial completa via API")
+    elif not garmin_cached:
+        print("Sem cache local do Garmin: fazendo carga inicial completa via API")
 
     print("Entrando no Garmin Connect...")
     client = login(args.token_dir)
@@ -233,14 +234,14 @@ def main() -> None:
 
     fetched = fetch_running_activities(
         client,
-        known_ids=set(existing_runs),
+        known_ids=set(garmin_cached),
         since=since,
         page_size=args.page_size,
         max_pages=args.max_pages,
         full=args.full,
     )
 
-    merged = dict(existing_runs)
+    merged = dict(all_cached)
     for run in fetched:
         merged[run["id"]] = run  # dados novos sobrescrevem (ex: corrida renomeada)
 
