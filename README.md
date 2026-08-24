@@ -33,7 +33,7 @@ manual) — útil pra cobrir corridas de antes de você ter um relógio Garmin.
                  └────────────────────────┘
 ```
 
-Três scripts alimentam o mesmo `report.json`, que serve tanto de relatório
+Quatro scripts alimentam o mesmo `report.json`, que serve tanto de relatório
 quanto de **cache local**:
 
 | Script | Fonte | Quando usar |
@@ -41,6 +41,7 @@ quanto de **cache local**:
 | [`scripts/analyze_runs.py`](scripts/analyze_runs.py) | Export manual do Garmin Connect (pasta `data/`) | Carga inicial instantânea, sem depender de login/rate limit |
 | [`scripts/fetch_garmin.py`](scripts/fetch_garmin.py) | API do Garmin Connect (login) | Atualizações de rotina — busca só as corridas novas |
 | [`scripts/analyze_nike.py`](scripts/analyze_nike.py) | Export manual do Nike Run Club (pasta `nike-data/`) | Consolidar histórico antigo do NRC no mesmo relatório |
+| [`scripts/fetch_nike.py`](scripts/fetch_nike.py) | API do Nike Run Club (access token) | Quando o export manual está desatualizado/incompleto — baixa direto da API pra `nike-data/activities/` |
 | [`scripts/build_page.py`](scripts/build_page.py) | `report.json` | Gera a página HTML a partir do relatório |
 | [`scripts/garmin_common.py`](scripts/garmin_common.py) | — | Marcos de distância + cache compartilhados pelos scripts de carga |
 
@@ -110,6 +111,43 @@ quantas corridas de cada categoria foram encontradas/puladas.
 
 Rode `analyze_nike.py` de novo sempre que baixar um export mais recente da
 Nike — ele mescla com o que já está em `report.json` sem apagar nada.
+
+### Alternativa — direto pela API, sem esperar o export manual
+
+O export de "Solicitar seus dados" da Nike pode demorar dias pra chegar e sair
+desatualizado assim que chega. [`scripts/fetch_nike.py`](scripts/fetch_nike.py)
+busca direto da API do Nike Run Club (os mesmos endpoints do
+[nrc-exporter](https://github.com/yasoob/nrc-exporter)) e salva o JSON de
+cada corrida em `nike-data/activities/`, no mesmo formato do export manual —
+depois é só rodar `analyze_nike.py` normalmente (ou deixar o próprio
+`fetch_nike.py` chamar `analyze_nike.py`/`build_page.py` pra você).
+
+Como a Nike bloqueia login automatizado por email/senha (Akamai Bot Manager),
+a autenticação aqui é por **access token colado à mão**, igual ao modo `-t`
+do nrc-exporter:
+
+1. Abra [nike.com](https://www.nike.com/) num navegador e faça login.
+2. Abra o DevTools (F12) → aba *Console* → cole e rode:
+
+   ```js
+   JSON.parse(window.localStorage.getItem('oidc.user:https://accounts.nike.com:4fd2d5e7db76e0f85a6bb56721bd51df')).access_token
+   ```
+3. Cole o valor impresso quando o script pedir (ou exporte
+   `NIKE_ACCESS_TOKEN` antes de rodar, pra não digitar toda vez). O token
+   costuma expirar em ~1h — se expirar no meio da execução, gere um novo e
+   rode de novo (retoma de onde parou: corridas já salvas em disco não são
+   rebaixadas, exceto com `--full`). **O token nunca é salvo em disco.**
+
+```bash
+# baixa só as corridas novas pra nike-data/activities/
+python scripts/fetch_nike.py
+
+# baixa e já consolida + regera a página, tudo numa tacada
+python scripts/fetch_nike.py --out report.json --html marcos-de-corrida.html
+
+# rebaixa o detalhe de TODAS as corridas da conta, não só as novas
+python scripts/fetch_nike.py --full
+```
 
 ## Atualização incremental
 
@@ -197,6 +235,7 @@ python scripts/fetch_garmin.py --out report.json
 │   ├── analyze_runs.py      # carga inicial do Garmin a partir de data/
 │   ├── fetch_garmin.py      # carga inicial ou incremental do Garmin via API
 │   ├── analyze_nike.py      # consolida o export do Nike Run Club (nike-data/)
+│   ├── fetch_nike.py        # baixa corridas direto da API do Nike Run Club pra nike-data/
 │   ├── build_page.py        # report.json -> HTML
 │   └── garmin_common.py     # marcos de distância + lógica compartilhada
 ├── report.json              # relatório/cache — não versionado
