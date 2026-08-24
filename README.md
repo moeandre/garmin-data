@@ -10,6 +10,9 @@ ano, uma seção de **Performance** (ritmo, cadência, frequência cardíaca e z
 de FC, filtrável por período), destaques (corrida mais longa, maratonas, ano
 mais ativo) e uma tabela completa e filtrável de todas as corridas.
 
+Opcionalmente, também consolida o histórico do **Nike Run Club** (export
+manual) — útil pra cobrir corridas de antes de você ter um relógio Garmin.
+
 ## Como funciona
 
 ```
@@ -17,23 +20,29 @@ mais ativo) e uma tabela completa e filtrável de todas as corridas.
   export GDPR    │  analyze_runs.py        │
   (pasta data/) ─▶  carga inicial offline  │─┐
                  └────────────────────────┘ │
-                                             │        ┌──────────────┐      ┌───────────────────┐
-                 ┌────────────────────────┐ ├───────▶│  report.json  │─────▶│  build_page.py     │──▶ marcos-de-corrida.html
-  Garmin Connect │  fetch_garmin.py        │ │        │  (cache local)│      └───────────────────┘
-  (API, login)  ─▶  carga inicial ou       │─┘        └──────────────┘
-                 │  atualização incremental│
+                                             │
+                 ┌────────────────────────┐ │        ┌──────────────┐      ┌───────────────────┐
+  Garmin Connect │  fetch_garmin.py        │ ├───────▶│  report.json  │─────▶│  build_page.py     │──▶ marcos-de-corrida.html
+  (API, login)  ─▶  carga inicial ou       │─┤        │  (cache local)│      └───────────────────┘
+                 │  atualização incremental│ │        └──────────────┘
+                 └────────────────────────┘ │
+                 ┌────────────────────────┐ │
+  export Nike    │  analyze_nike.py         │ │
+  (nike-data/)  ─▶  consolida no mesmo     │─┘
+                 │  report.json            │
                  └────────────────────────┘
 ```
 
-Duas formas de alimentar o mesmo `report.json`, que serve tanto de relatório
+Três scripts alimentam o mesmo `report.json`, que serve tanto de relatório
 quanto de **cache local**:
 
 | Script | Fonte | Quando usar |
 |---|---|---|
 | [`scripts/analyze_runs.py`](scripts/analyze_runs.py) | Export manual do Garmin Connect (pasta `data/`) | Carga inicial instantânea, sem depender de login/rate limit |
 | [`scripts/fetch_garmin.py`](scripts/fetch_garmin.py) | API do Garmin Connect (login) | Atualizações de rotina — busca só as corridas novas |
+| [`scripts/analyze_nike.py`](scripts/analyze_nike.py) | Export manual do Nike Run Club (pasta `nike-data/`) | Consolidar histórico antigo do NRC no mesmo relatório |
 | [`scripts/build_page.py`](scripts/build_page.py) | `report.json` | Gera a página HTML a partir do relatório |
-| [`scripts/garmin_common.py`](scripts/garmin_common.py) | — | Marcos de distância + cache compartilhados pelos dois scripts de carga |
+| [`scripts/garmin_common.py`](scripts/garmin_common.py) | — | Marcos de distância + cache compartilhados pelos scripts de carga |
 
 ## Instalação
 
@@ -74,6 +83,34 @@ abaixo). Como pagina o histórico inteiro pela API, pode demorar mais e esbarrar
 limite de requisições dependendo de quantos anos de corrida você tem — prefira a
 Opção A se já tiver o export em mãos.
 
+## Consolidando o histórico do Nike Run Club (opcional)
+
+Se você corria com o Nike Run Club antes de ter um Garmin (ou ainda registra
+corridas por lá às vezes), dá pra somar esse histórico ao mesmo relatório:
+
+1. Peça seu export em [privacy.nike.com](https://privacy.nike.com) (ou pelo
+   app: *Perfil → Configurações → Privacidade → Solicitar seus dados*) — a
+   Nike manda um e-mail com um link de download em alguns dias.
+2. Descompacte o conteúdo dentro da pasta [`nike-data/`](nike-data) deste
+   projeto, mantendo a estrutura original (`nike-data/activities/*.json`).
+3. Rode:
+
+   ```bash
+   python scripts/analyze_nike.py --out report.json
+   python scripts/build_page.py report.json marcos-de-corrida.html
+   ```
+
+**Importante:** quem sincroniza o relógio Garmin com o Nike Run Club acaba
+com a mesma corrida duplicada no export da Nike (uma cópia salva com
+`app_id: "com.garmin.garmin"`). O script **ignora essas automaticamente** —
+só importa corridas registradas nativamente pelo app da Nike — e ainda pula
+qualquer corrida cuja data e distância batam com uma que já exista no
+`report.json`, como segurança extra contra duplicata. O terminal mostra
+quantas corridas de cada categoria foram encontradas/puladas.
+
+Rode `analyze_nike.py` de novo sempre que baixar um export mais recente da
+Nike — ele mescla com o que já está em `report.json` sem apagar nada.
+
 ## Atualização incremental
 
 Depois da carga inicial (por qualquer uma das opções acima), rode periodicamente:
@@ -113,12 +150,12 @@ média simples dos ritmos), que é o jeito correto de agregar.
 
 A disponibilidade de cada dado depende de como a corrida entrou no relatório:
 
-| Dado | Export do Garmin (`analyze_runs.py`) | API do Garmin (`fetch_garmin.py`) |
-|---|---|---|
-| Ritmo | sempre (via distância/duração) | sempre |
-| Cadência | se o dispositivo registrou | se o dispositivo registrou |
-| FC média | se usou monitor de FC | se usou monitor de FC |
-| Zona de FC | se o export trouxe o detalhe por zona | se usou monitor de FC (1 chamada extra por corrida — `--skip-hr-zones` desliga) |
+| Dado | Export do Garmin (`analyze_runs.py`) | API do Garmin (`fetch_garmin.py`) | Export do Nike Run Club (`analyze_nike.py`) |
+|---|---|---|---|
+| Ritmo | sempre (via distância/duração) | sempre | sempre |
+| Cadência | se o dispositivo registrou | se o dispositivo registrou | não disponível |
+| FC média | se usou monitor de FC | se usou monitor de FC | se usou monitor de FC |
+| Zona de FC | se o export trouxe o detalhe por zona | se usou monitor de FC (1 chamada extra por corrida — `--skip-hr-zones` desliga) | não disponível |
 
 Corridas sem um dado específico simplesmente não entram naquela média — cada
 cartão mostra "N de M corridas com dado" pra deixar isso visível.
@@ -155,9 +192,11 @@ python scripts/fetch_garmin.py --out report.json
 ```
 .
 ├── data/                    # export do Garmin Connect (GDPR) — não versionado
+├── nike-data/               # export do Nike Run Club — não versionado
 ├── scripts/
-│   ├── analyze_runs.py      # carga inicial a partir de data/
-│   ├── fetch_garmin.py      # carga inicial ou incremental via API
+│   ├── analyze_runs.py      # carga inicial do Garmin a partir de data/
+│   ├── fetch_garmin.py      # carga inicial ou incremental do Garmin via API
+│   ├── analyze_nike.py      # consolida o export do Nike Run Club (nike-data/)
 │   ├── build_page.py        # report.json -> HTML
 │   └── garmin_common.py     # marcos de distância + lógica compartilhada
 ├── report.json              # relatório/cache — não versionado
@@ -167,10 +206,10 @@ python scripts/fetch_garmin.py --out report.json
 └── README.md
 ```
 
-`data/`, `report.json`, `marcos-de-corrida.html` e `~/.garmin_tokens` ficam de
-fora do git (veja [`.gitignore`](.gitignore)) porque carregam dados pessoais
-de saúde/localização ou credenciais de sessão — nada disso deveria ir para um
-repositório, nem privado.
+`data/`, `nike-data/`, `report.json`, `marcos-de-corrida.html` e
+`~/.garmin_tokens` ficam de fora do git (veja [`.gitignore`](.gitignore))
+porque carregam dados pessoais de saúde/localização ou credenciais de
+sessão — nada disso deveria ir para um repositório, nem privado.
 
 ## Os marcos de distância
 
@@ -185,4 +224,6 @@ Definidos em [`scripts/garmin_common.py`](scripts/garmin_common.py):
 | 42 km | 42,195 km (maratona oficial) × (1 − tolerância) |
 
 A tolerância padrão é 3% (ajustável com `--tolerance` em qualquer um dos
-scripts) pra não descartar uma corrida por causa de imprecisão de GPS.
+scripts) pra não descartar uma corrida por causa de imprecisão de GPS. Os
+marcos somam corridas do Garmin e do Nike Run Club juntas — uma corrida de
+21&nbsp;km registrada em qualquer um dos dois conta do mesmo jeito.

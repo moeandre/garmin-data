@@ -3,8 +3,10 @@
 
 # Dados pessoais do export/relatorio.
 data/
+nike-data/
 report.json
 marcos-de-corrida.html
+marcos-de-corrida-publish.html
 
 __pycache__/
 *.pyc
