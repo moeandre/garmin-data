@@ -6,20 +6,26 @@ e consolida no mesmo report.json usado por analyze_runs.py / fetch_garmin.py
 — as corridas do Garmin e do Nike ficam somadas no mesmo relatorio de marcos
 de distancia.
 
-Por que filtrar por app_id:
+Por que checar duplicata por data+distancia (e nao so por app_id):
     Quem sincroniza o relogio Garmin com o Nike Run Club acaba com a MESMA
-    corrida duplicada no export da Nike (uma vinda do relogio, salva com
-    app_id "com.garmin.garmin"). Importar isso de novo contaria a mesma
-    corrida duas vezes. Este script so importa corridas nativas do app da
-    Nike (registradas pelo proprio app, sem vir de um relogio Garmin) —
-    tipicamente o historico de antes de você ter um Garmin, ou corridas
-    registradas so pelo celular. Nos dados desse projeto isso reduziu 718
-    atividades pra 148 corridas realmente exclusivas do Nike.
+    corrida duplicada no export da Nike (uma copia salva com app_id
+    "com.garmin.garmin" ou variantes). Importar isso de novo contaria a
+    mesma corrida duas vezes — mas o app_id sozinho NAO e garantia de que a
+    corrida ja esta no --out: se o export/API do Garmin nao cobrir aquele
+    periodo (conta criada depois, export parcial, atividade apagada do
+    Garmin Connect etc.), a corrida "sincronizada" existe SO no lado Nike, e
+    descarta-la por confiar cegamente no app_id perde ela pra sempre. Nesse
+    projeto isso ja aconteceu: ~118 corridas de 2018-2019, marcadas como
+    vindas do Garmin, nao tinham nenhuma correspondente real no report.json.
 
-    Como seguranca extra, qualquer corrida "nativa" do Nike cuja data e
-    distancia batam (± 300m) com uma corrida ja presente no --out tambem e
-    pulada, pro caso raro de voce ter registrado a mesma corrida nos dois
-    apps manualmente.
+    Por isso toda corrida do Nike passa pela mesma checagem de duplicata:
+    so e descartada se sua data e distancia baterem (± 300m) com uma
+    corrida ja presente no --out (ou ja adicionada nesta mesma execucao).
+    O app_id so serve pra estatistica no resumo impresso no terminal — ele
+    nunca decide sozinho se uma corrida entra ou nao. Use
+    --trust-garmin-tag pra voltar ao comportamento antigo (descarta so
+    pelo app_id, sem checar data/distancia) se por algum motivo voce
+    confiar mais nessa tag do que nos dados.
 
 Uso:
     python scripts/analyze_nike.py --out report.json
@@ -78,11 +84,9 @@ def find_metric(summaries: list[dict], metric: str, summary: str = "total") -> f
     return None
 
 
-def normalize_activity(a: dict, skip_garmin_synced: bool = True) -> dict | None:
+def normalize_activity(a: dict) -> dict | None:
     if str(a.get("type", "")).lower() != "run":
         return None
-    if skip_garmin_synced and str(a.get("app_id") or "").startswith(GARMIN_SYNCED_PREFIX):
-        return None  # ja veio (ou deveria vir) do Garmin — evita contar 2x
 
     start_ms = a.get("start_epoch_ms")
     if start_ms is None:
@@ -125,7 +129,12 @@ def main() -> None:
     parser.add_argument("--nike-dir", default="nike-data", help="Pasta com o export do Nike Run Club (padrao: nike-data)")
     parser.add_argument("--out", default="report.json", help="Arquivo JSON de saida (mesclado com o que ja existir)")
     parser.add_argument("--tolerance", type=float, default=0.03, help="Margem de tolerancia por marco (0.03 = 3%%)")
-    parser.add_argument("--include-garmin-synced", action="store_true", help="Nao filtra corridas sincronizadas do Garmin (cuidado: provavel duplicar dados)")
+    parser.add_argument(
+        "--trust-garmin-tag", action="store_true",
+        help="Volta ao comportamento antigo: descarta so pelo app_id 'com.garmin.*', sem checar "
+        "se a corrida realmente tem uma correspondente por data+distancia (cuidado: pode perder "
+        "corridas que so existem no Nike apesar da tag)",
+    )
     args = parser.parse_args()
 
     existing = load_cached_runs(args.out)
@@ -136,15 +145,18 @@ def main() -> None:
     print(f"{len(activities)} atividades encontradas em {args.nike_dir}/activities")
 
     added = []
-    skipped_garmin_synced = 0
+    tagged_garmin_synced = 0
+    skipped_garmin_tag = 0
     skipped_duplicate = 0
     skipped_incomplete = 0
     for a in activities:
         is_garmin_synced = str(a.get("app_id") or "").startswith(GARMIN_SYNCED_PREFIX)
-        if not args.include_garmin_synced and is_garmin_synced:
-            skipped_garmin_synced += 1
+        if is_garmin_synced:
+            tagged_garmin_synced += 1
+        if args.trust_garmin_tag and is_garmin_synced:
+            skipped_garmin_tag += 1
             continue
-        run = normalize_activity(a, skip_garmin_synced=not args.include_garmin_synced)
+        run = normalize_activity(a)
         if run is None:
             skipped_incomplete += 1
             continue
@@ -154,7 +166,9 @@ def main() -> None:
         added.append(run)
 
     print(f"  {len(added)} corridas novas do Nike Run Club")
-    print(f"  {skipped_garmin_synced} ignoradas (ja sincronizadas de um relogio Garmin)")
+    print(f"  {tagged_garmin_synced} tinham app_id de relogio Garmin (so estatistica — nao decide sozinho)")
+    if args.trust_garmin_tag:
+        print(f"  {skipped_garmin_tag} ignoradas so pelo app_id (--trust-garmin-tag)")
     print(f"  {skipped_duplicate} ignoradas (batem em data+distancia com uma corrida ja existente)")
     print(f"  {skipped_incomplete} ignoradas (sem tipo/distancia valida)")
 
